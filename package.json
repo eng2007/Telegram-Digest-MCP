@@ -1,0 +1,43 @@
+{
+  "name": "telegram-digest-mcp",
+  "version": "1.0.0",
+  "description": "Local Telegram chat summarizer with MCP support, incremental summaries, and structured reports.",
+  "main": "src/index.js",
+  "files": [
+    "src",
+    "config",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md"
+  ],
+  "scripts": {
+    "start": "node src/index.js",
+    "mcp": "node src/mcp-server.js",
+    "check": "node --check src/index.js && node --check src/mcp-server.js",
+    "test": "node --test"
+  },
+  "keywords": [
+    "telegram",
+    "mcp",
+    "llm",
+    "summarization",
+    "telegram-api",
+    "gramjs"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "dotenv": "^17.3.1",
+    "input": "^1.0.1",
+    "markdown-it": "^14.1.1",
+    "markdown-it-anchor": "^9.2.0",
+    "telegram": "^2.26.22"
+  }
+}
