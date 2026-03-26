@@ -67,6 +67,10 @@ async function choosePeriod(args) {
     return argPeriod;
   }
 
+  if (args.period !== undefined) {
+    throw new Error(`Invalid period "${args.period}". Use: day, week, month, or all.`);
+  }
+
   console.log("\nChoose period:");
   console.log("1. Day");
   console.log("2. Week");
@@ -87,6 +91,10 @@ async function chooseDialogActivityPeriod(args) {
   const argPeriod = resolvePeriod(args.dialogPeriod || args["dialog-period"]);
   if (argPeriod) {
     return argPeriod;
+  }
+
+  if (args.dialogPeriod !== undefined || args["dialog-period"] !== undefined) {
+    throw new Error(`Invalid dialog-period "${args.dialogPeriod || args["dialog-period"]}". Use: day, week, month, or all.`);
   }
 
   console.log("\nFilter dialogs by new messages in:");
@@ -119,17 +127,22 @@ async function chooseDialog(client, args, dialogPeriod) {
   }
 
   if (args.chat) {
-    const lowered = String(args.chat).toLowerCase();
-    const matched = dialogs.find(
-      (dialog) =>
+    const normalizedInput = String(args.chat).normalize("NFKC").toLowerCase();
+    const matched = dialogs.find((dialog) => {
+      const normalizedTitle = dialog.title.normalize("NFKC").toLowerCase();
+      return (
         dialog.id === args.chat ||
-        dialog.title.toLowerCase().includes(lowered) ||
-        String(dialog.index) === args.chat,
-    );
+        normalizedTitle.includes(normalizedInput) ||
+        normalizedTitle === normalizedInput ||
+        String(dialog.index) === String(args.chat)
+      );
+    });
 
     if (matched) {
       return matched;
     }
+
+    throw new Error(`Dialog "${args.chat}" not found. Available dialogs are listed above.`);
   }
 
   const selected = await input.text("\nChoose dialog number: ");
