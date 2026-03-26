@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
 
 import { SUMMARY_LANGUAGES } from "../config/summary-languages.js";
 import {
@@ -8,8 +9,10 @@ import {
   chunkMessages,
   formatMessage,
   preprocessMessages,
+  resolveOutputFormats,
   resolveRunMode,
   resolveSummaryLanguage,
+  saveOutputs,
 } from "../src/index.js";
 
 test("resolveSummaryLanguage returns English by default and supports configured languages", () => {
@@ -202,4 +205,45 @@ test("resolveRunMode supports the documented aliases", () => {
   assert.equal(resolveRunMode("inc"), "incremental");
   assert.equal(resolveRunMode("diff"), "changes");
   assert.equal(resolveRunMode("weird"), undefined);
+});
+
+test("resolveOutputFormats supports all and comma-separated individual formats", () => {
+  assert.deepEqual(resolveOutputFormats(), ["messages", "markdown", "structured", "html"]);
+  assert.deepEqual(resolveOutputFormats("html"), ["html"]);
+  assert.deepEqual(resolveOutputFormats("md,json"), ["markdown", "structured"]);
+  assert.deepEqual(resolveOutputFormats(["messages", "html"]), ["messages", "html"]);
+  assert.deepEqual(resolveOutputFormats("all"), ["messages", "markdown", "structured", "html"]);
+  assert.equal(resolveOutputFormats("pdf"), undefined);
+});
+
+test("saveOutputs writes only the requested output formats", async () => {
+  const files = await saveOutputs(
+    { id: "dialog-1", title: "Test Output Selection" },
+    [
+      {
+        id: 1,
+        date: "2026-03-22T10:00:00.000Z",
+        senderId: "123",
+        senderLabel: "Ivan (123)",
+        text: "Hello",
+      },
+    ],
+    "# Summary\n\n## Highlights\n- Item 1",
+    SUMMARY_LANGUAGES.en,
+    ["markdown", "html"],
+  );
+
+  assert.deepEqual(files.outputFormats, ["markdown", "html"]);
+  assert.equal(files.messagesPath, null);
+  assert.ok(files.summaryPath);
+  assert.equal(files.structuredPath, null);
+  assert.ok(files.htmlPath);
+
+  await assert.doesNotReject(() => fs.access(files.summaryPath));
+  await assert.doesNotReject(() => fs.access(files.htmlPath));
+  await assert.rejects(() => fs.access(files.summaryPath.replace(".summary.md", ".messages.json")));
+  await assert.rejects(() => fs.access(files.summaryPath.replace(".summary.md", ".summary.json")));
+
+  await fs.unlink(files.summaryPath);
+  await fs.unlink(files.htmlPath);
 });

@@ -3,7 +3,7 @@ import MarkdownIt from "markdown-it";
 import markdownItAnchor from "markdown-it-anchor";
 import path from "node:path";
 
-import { OUTPUT_DIR, ensureDir } from "./config.js";
+import { OUTPUT_DIR, OUTPUT_FORMATS, ensureDir } from "./config.js";
 
 const markdownRenderer = new MarkdownIt({
   html: false,
@@ -217,7 +217,7 @@ function buildHtmlReport(dialog, messages, markdownReport, language) {
 </html>`;
 }
 
-export async function saveOutputs(dialog, messages, summary, language) {
+export async function saveOutputs(dialog, messages, summary, language, outputFormats = OUTPUT_FORMATS) {
   await ensureDir(OUTPUT_DIR);
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -229,11 +229,26 @@ export async function saveOutputs(dialog, messages, summary, language) {
   const markdownReport = buildMarkdownReport(dialog, messages, summary, language);
   const structuredSummary = buildStructuredSummary(dialog, messages, markdownReport, language);
   const htmlReport = buildHtmlReport(dialog, messages, markdownReport, language);
+  const selectedFormats = new Set(outputFormats);
 
-  await fs.writeFile(messagesPath, JSON.stringify(messages, null, 2), "utf8");
-  await fs.writeFile(summaryPath, markdownReport, "utf8");
-  await fs.writeFile(structuredPath, JSON.stringify(structuredSummary, null, 2), "utf8");
-  await fs.writeFile(htmlPath, htmlReport, "utf8");
+  if (selectedFormats.has("messages")) {
+    await fs.writeFile(messagesPath, JSON.stringify(messages, null, 2), "utf8");
+  }
+  if (selectedFormats.has("markdown")) {
+    await fs.writeFile(summaryPath, markdownReport, "utf8");
+  }
+  if (selectedFormats.has("structured")) {
+    await fs.writeFile(structuredPath, JSON.stringify(structuredSummary, null, 2), "utf8");
+  }
+  if (selectedFormats.has("html")) {
+    await fs.writeFile(htmlPath, htmlReport, "utf8");
+  }
 
-  return { messagesPath, summaryPath, structuredPath, htmlPath };
+  return {
+    outputFormats: [...selectedFormats],
+    messagesPath: selectedFormats.has("messages") ? messagesPath : null,
+    summaryPath: selectedFormats.has("markdown") ? summaryPath : null,
+    structuredPath: selectedFormats.has("structured") ? structuredPath : null,
+    htmlPath: selectedFormats.has("html") ? htmlPath : null,
+  };
 }

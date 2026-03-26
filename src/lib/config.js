@@ -24,6 +24,7 @@ export const DEFAULT_SUMMARY_CONCURRENCY = Number(process.env.SUMMARY_CONCURRENC
 export const DEFAULT_MERGE_WINDOW_MINUTES = Number(process.env.MERGE_WINDOW_MINUTES || 10);
 export const DEFAULT_RUN_MODE = process.env.RUN_MODE || "full";
 export const DEFAULT_LLM_MAX_OUTPUT_TOKENS = Number(process.env.LLM_MAX_OUTPUT_TOKENS || 8000);
+export const OUTPUT_FORMATS = ["messages", "markdown", "structured", "html"];
 
 export function requireEnv(name) {
   const value = process.env[name];
@@ -227,6 +228,61 @@ export function resolveRunMode(value) {
   }
 
   return undefined;
+}
+
+export function resolveOutputFormats(value) {
+  if (value === undefined || value === null || value === "") {
+    return [...OUTPUT_FORMATS];
+  }
+
+  const rawValues = Array.isArray(value) ? value : [value];
+  const tokens = rawValues
+    .flatMap((item) => String(item).split(","))
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+
+  if (!tokens.length) {
+    return [...OUTPUT_FORMATS];
+  }
+
+  if (tokens.includes("all")) {
+    return [...OUTPUT_FORMATS];
+  }
+
+  const resolved = [];
+  for (const token of tokens) {
+    let normalized;
+
+    switch (token) {
+      case "messages":
+      case "message":
+      case "raw":
+      case "msgs":
+        normalized = "messages";
+        break;
+      case "markdown":
+      case "md":
+      case "summary":
+        normalized = "markdown";
+        break;
+      case "structured":
+      case "json":
+      case "summary-json":
+        normalized = "structured";
+        break;
+      case "html":
+        normalized = "html";
+        break;
+      default:
+        return undefined;
+    }
+
+    if (!resolved.includes(normalized)) {
+      resolved.push(normalized);
+    }
+  }
+
+  return resolved;
 }
 
 export function describeRunMode(mode) {

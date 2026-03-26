@@ -89,7 +89,7 @@ npm run mcp
 - fetches text messages for a selected period
 - cleans and merges messages before summarization
 - summarizes in chunks and produces a final report
-- saves markdown, JSON, and HTML output
+- saves all output formats by default, or only selected ones
 - supports incremental summaries via checkpoints
 - exposes the same logic through MCP tools
 
@@ -137,6 +137,14 @@ Optional flags:
 - `--language` override `SUMMARY_LANGUAGE`
 - `--mode` one of `full`, `incremental`, `changes`
 - `--period` one of `day`, `week`, `month`, `all`
+- `--output-format` one format or a comma-separated list: `messages`, `markdown`, `structured`, `html`, `all`
+
+Examples:
+
+```bash
+node src/index.js --chat "My Group" --period week --output-format html
+node src/index.js --chat "My Group" --period week --output-format markdown,html
+```
 
 Runtime settings:
 
@@ -185,6 +193,8 @@ Files are written to `output/`:
 - `*.summary.md` markdown summary with stats, table of contents, short version and full version
 - `*.summary.json` structured summary payload with extracted sections and parsed bullet arrays
 - `*.summary.html` readable HTML report
+
+By default the app writes all four files. You can limit this in CLI with `--output-format` or in MCP with `outputFormats`.
 
 The app also stores:
 
@@ -242,7 +252,8 @@ Before using MCP, run `npm start` once and complete Telegram login.
   "provider": "opencode-go-openai",
   "model": "glm-5",
   "language": "en",
-  "saveOutputs": true
+  "saveOutputs": true,
+  "outputFormats": ["markdown", "html"]
 }
 ```
 

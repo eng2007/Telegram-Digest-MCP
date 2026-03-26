@@ -21,6 +21,7 @@ import {
   preprocessMessages,
   readSessionString,
   resolveLlmSelection,
+  resolveOutputFormats,
   resolvePeriod,
   resolveRunMode,
   resolveSummaryLanguage,
@@ -53,6 +54,14 @@ function requireResolvedRunMode(value) {
     throw new Error("Invalid mode. Use one of: full, incremental, changes.");
   }
   return mode;
+}
+
+function requireResolvedOutputFormats(value) {
+  const formats = resolveOutputFormats(value);
+  if (!formats) {
+    throw new Error("Invalid outputFormats. Use one or more of: messages, markdown, structured, html, all.");
+  }
+  return formats;
 }
 
 async function connectTelegramForMcp() {
@@ -314,7 +323,7 @@ server.registerTool(
 server.registerTool(
   "summarize_dialog",
   {
-    description: "Summarize a Telegram dialog and optionally save markdown/json/html report files.",
+    description: "Summarize a Telegram dialog and optionally save messages/markdown/json/html output files.",
     inputSchema: {
       dialogRef: z
         .string()
@@ -327,6 +336,10 @@ server.registerTool(
       model: z.string().optional(),
       language: z.string().optional(),
       saveOutputs: z.boolean().optional(),
+      outputFormats: z
+        .array(z.enum(["messages", "markdown", "structured", "html"]))
+        .optional()
+        .describe("Optional list of output files to save. Defaults to all formats."),
     },
     outputSchema: {
       dialog: z.object({
@@ -345,15 +358,27 @@ server.registerTool(
       summary: z.string(),
       files: z
         .object({
-          messagesPath: z.string(),
-          summaryPath: z.string(),
-          structuredPath: z.string(),
-          htmlPath: z.string(),
+          outputFormats: z.array(z.string()),
+          messagesPath: z.union([z.string(), z.null()]),
+          summaryPath: z.union([z.string(), z.null()]),
+          structuredPath: z.union([z.string(), z.null()]),
+          htmlPath: z.union([z.string(), z.null()]),
         })
         .nullable(),
     },
   },
-  async ({ dialogRef, period, limit, mode, activityPeriod, provider, model, language, saveOutputs: shouldSaveOutputs = true }) => {
+  async ({
+    dialogRef,
+    period,
+    limit,
+    mode,
+    activityPeriod,
+    provider,
+    model,
+    language,
+    saveOutputs: shouldSaveOutputs = true,
+    outputFormats,
+  }) => {
     const client = await connectTelegramForMcp();
     try {
       const selectedActivityPeriod = requireResolvedPeriod(activityPeriod || "all", "activityPeriod");
@@ -361,7 +386,9 @@ server.registerTool(
       const dialog = matchDialog(dialogs, dialogRef);
       const selectedPeriod = requireResolvedPeriod(period || "all", "period");
       const selectedMode = requireResolvedRunMode(mode || "full");
-  const summaryLanguage = resolveSummaryLanguage(language || process.env.SUMMARY_LANGUAGE) || resolveSummaryLanguage("en");
+      const summaryLanguage =
+        resolveSummaryLanguage(language || process.env.SUMMARY_LANGUAGE) || resolveSummaryLanguage("en");
+      const selectedOutputFormats = requireResolvedOutputFormats(outputFormats);
       const llmSelection = await resolveLlmSelection({ provider, model });
       const messageLimit = ensurePositiveLimit(limit);
       const exactMessageCount = await getExactMessageCount(client, dialog.entity);
@@ -427,7 +454,13 @@ server.registerTool(
 
       let files = null;
       if (shouldSaveOutputs) {
-        files = await saveOutputs(dialog, preprocessResult.messages, summary, summaryLanguage);
+        files = await saveOutputs(
+          dialog,
+          preprocessResult.messages,
+          summary,
+          summaryLanguage,
+          selectedOutputFormats,
+        );
       }
 
       checkpoints[checkpointKey] = {

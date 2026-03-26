@@ -22,6 +22,7 @@ import {
   resolvePeriod,
   resolveProvider,
   resolveProviderModel,
+  resolveOutputFormats,
   resolveRunMode,
   resolveSummaryLanguage,
   saveCheckpoints,
@@ -146,9 +147,15 @@ export async function runCli() {
   const messageLimit = Number(args.limit || DEFAULT_MESSAGE_LIMIT);
   const runMode = resolveRunMode(args.mode || DEFAULT_RUN_MODE) || "full";
   const summaryLanguage = resolveSummaryLanguage(args.language || process.env.SUMMARY_LANGUAGE) || SUMMARY_LANGUAGES.en;
+  const outputFormats = resolveOutputFormats(
+    args["output-format"] || args["output-formats"] || args.format || args.formats,
+  );
 
   if (!Number.isFinite(messageLimit) || messageLimit <= 0) {
     throw new Error("Message limit must be a positive number.");
+  }
+  if (!outputFormats) {
+    throw new Error("Invalid output format. Use one or more of: messages, markdown, structured, html, all.");
   }
 
   const client = await connectTelegram();
@@ -159,6 +166,7 @@ export async function runCli() {
       `Selected LLM: ${llmSelection.provider.label} / ${llmSelection.modelLabel} (${llmSelection.modelId})`,
     );
     console.log(`Summary language: ${summaryLanguage.nativeLabel} (${summaryLanguage.id})`);
+    console.log(`Output formats: ${outputFormats.join(", ")}`);
     const dialogActivityPeriod = await chooseDialogActivityPeriod(args);
     console.log(`Dialog activity filter: ${describePeriod(dialogActivityPeriod)}`);
     const dialog = await chooseDialog(client, args, dialogActivityPeriod);
@@ -224,7 +232,7 @@ export async function runCli() {
     const summaryTitle =
       runMode === "changes" ? `${dialog.title} (changes since last summary)` : dialog.title;
     const summary = await summarizeMessages(filteredMessages, summaryTitle, llmSelection, summaryLanguage);
-    const files = await saveOutputs(dialog, filteredMessages, summary, summaryLanguage);
+    const files = await saveOutputs(dialog, filteredMessages, summary, summaryLanguage, outputFormats);
     checkpoints[checkpointKey] = {
       dialogId: dialog.id,
       dialogTitle: dialog.title,
@@ -240,10 +248,18 @@ export async function runCli() {
     await saveCheckpoints(checkpoints);
 
     console.log("\nDone.");
-    console.log(`Messages saved to: ${files.messagesPath}`);
-    console.log(`Summary saved to: ${files.summaryPath}`);
-    console.log(`Structured summary saved to: ${files.structuredPath}`);
-    console.log(`HTML report saved to: ${files.htmlPath}`);
+    if (files.messagesPath) {
+      console.log(`Messages saved to: ${files.messagesPath}`);
+    }
+    if (files.summaryPath) {
+      console.log(`Summary saved to: ${files.summaryPath}`);
+    }
+    if (files.structuredPath) {
+      console.log(`Structured summary saved to: ${files.structuredPath}`);
+    }
+    if (files.htmlPath) {
+      console.log(`HTML report saved to: ${files.htmlPath}`);
+    }
   } finally {
     await client.disconnect();
   }
@@ -283,6 +299,7 @@ export {
   resolvePeriod,
   resolveProvider,
   resolveProviderModel,
+  resolveOutputFormats,
   resolveRunMode,
   resolveSummaryConcurrency,
   resolveSummaryLanguage,
