@@ -1,5 +1,11 @@
+import http from "node:http";
+import https from "node:https";
+
+import { SocksProxyAgent } from "socks-proxy-agent";
+
 import {
   DEFAULT_LLM_MAX_OUTPUT_TOKENS,
+  DEFAULT_LLM_REQUEST_TIMEOUT_MS,
   DEFAULT_SUMMARY_CONCURRENCY,
   loadSummaryPrompts,
   readChunkCache,
@@ -9,6 +15,151 @@ import {
   sleep,
   writeChunkCache,
 } from "./config.js";
+
+export function buildLlmProxyUrl() {
+  const host = process.env.LLM_PROXY_HOST?.trim();
+  const portRaw = process.env.LLM_PROXY_PORT?.trim();
+  const protocol = (process.env.LLM_PROXY_PROTOCOL?.trim() || "socks5").toLowerCase();
+  const username = process.env.LLM_PROXY_USERNAME?.trim();
+  const password = process.env.LLM_PROXY_PASSWORD?.trim();
+
+  if (!host && !portRaw && !username && !password) {
+    return undefined;
+  }
+
+  if (!host) {
+    throw new Error("LLM_PROXY_HOST must be set when using LLM proxy settings.");
+  }
+
+  const port = Number(portRaw || "");
+  if (!Number.isFinite(port) || port <= 0) {
+    throw new Error("LLM_PROXY_PORT must be a positive number when LLM_PROXY_HOST is set.");
+  }
+
+  if (password && !username) {
+    throw new Error("LLM_PROXY_PASSWORD requires LLM_PROXY_USERNAME.");
+  }
+
+  if (!["socks", "socks4", "socks4a", "socks5", "socks5h"].includes(protocol)) {
+    throw new Error("LLM_PROXY_PROTOCOL must be one of: socks, socks4, socks4a, socks5, socks5h.");
+  }
+
+  const credentials = username
+    ? `${encodeURIComponent(username)}${password ? `:${encodeURIComponent(password)}` : ""}@`
+    : "";
+
+  return `${protocol}://${credentials}${host}:${port}`;
+}
+
+function createProxyAgent() {
+  const proxyUrl = buildLlmProxyUrl();
+  if (!proxyUrl) {
+    return undefined;
+  }
+  return new SocksProxyAgent(proxyUrl);
+}
+
+function formatLlmContext({ providerId, modelId, endpoint, proxyEnabled }) {
+  return [
+    providerId ? `provider=${providerId}` : null,
+    modelId ? `model=${modelId}` : null,
+    endpoint ? `endpoint=${endpoint}` : null,
+    `proxy=${proxyEnabled ? "configured" : "direct"}`,
+  ]
+    .filter(Boolean)
+    .join(", ");
+}
+
+export function describeLlmError(error, context = {}) {
+  const contextText = formatLlmContext(context);
+  const contextSuffix = contextText ? ` (${contextText})` : "";
+  const causeCode = error?.cause?.code ? `; cause=${error.cause.code}` : "";
+  const causeMessage =
+    error?.cause?.message && error.cause.message !== error.message
+      ? `; detail=${error.cause.message}`
+      : "";
+
+  if (error?.name === "TimeoutError" || error?.name === "AbortError") {
+    const timeoutMs = Number(context.timeoutMs);
+    if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+      return `LLM request timed out after ${timeoutMs}ms${contextSuffix}.`;
+    }
+
+    return `LLM request timed out${contextSuffix}.`;
+  }
+
+  if (error?.message === "fetch failed" || error?.code) {
+    return `LLM network error${contextSuffix}: request failed${causeCode}${causeMessage}.`;
+  }
+
+  const baseMessage = error?.message || String(error);
+  return `${baseMessage}${contextSuffix}${causeCode}${causeMessage}.`;
+}
+
+async function requestWithLlmDiagnostics(endpoint, options, context) {
+  try {
+    return await sendJsonRequest(endpoint, options);
+  } catch (error) {
+    throw new Error(describeLlmError(error, context), { cause: error });
+  }
+}
+
+async function sendJsonRequest(endpoint, options) {
+  const url = new URL(endpoint);
+  const transport = url.protocol === "https:" ? https : http;
+
+  return await new Promise((resolve, reject) => {
+    const request = transport.request(url, {
+      method: options.method || "GET",
+      headers: options.headers,
+      agent: options.agent,
+    });
+
+    const timeoutMs = Number(options.timeoutMs);
+    if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+      request.setTimeout(timeoutMs, () => {
+        request.destroy(Object.assign(new Error(`Request timed out after ${timeoutMs}ms`), { name: "TimeoutError" }));
+      });
+    }
+
+    request.on("error", reject);
+
+    request.on("response", (response) => {
+      const chunks = [];
+
+      response.on("data", (chunk) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+
+      response.on("end", () => {
+        const raw = Buffer.concat(chunks).toString("utf8");
+        let data;
+
+        if (!raw) {
+          data = { _raw: "" };
+        } else {
+          try {
+            data = JSON.parse(raw);
+          } catch {
+            data = { _raw: raw };
+          }
+        }
+
+        resolve({
+          status: response.statusCode || 0,
+          ok: Boolean(response.statusCode && response.statusCode >= 200 && response.statusCode < 300),
+          data,
+        });
+      });
+    });
+
+    if (options.body) {
+      request.write(options.body);
+    }
+
+    request.end();
+  });
+}
 
 export async function callLlm(provider, modelId, systemPrompt, userPrompt) {
   const retryDelaysMs = [10_000, 30_000, 60_000];
@@ -43,9 +194,17 @@ async function callLlmOnce(provider, modelId, systemPrompt, userPrompt) {
   const maxOutputTokens = Number.isFinite(DEFAULT_LLM_MAX_OUTPUT_TOKENS) && DEFAULT_LLM_MAX_OUTPUT_TOKENS > 0
     ? DEFAULT_LLM_MAX_OUTPUT_TOKENS
     : 8000;
+  const agent = createProxyAgent();
+  const requestContext = {
+    providerId: provider.id,
+    modelId,
+    endpoint,
+    proxyEnabled: Boolean(agent),
+    timeoutMs: DEFAULT_LLM_REQUEST_TIMEOUT_MS,
+  };
 
   if (provider.apiType === "openai") {
-    const response = await fetch(endpoint, {
+    const response = await requestWithLlmDiagnostics(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -59,19 +218,22 @@ async function callLlmOnce(provider, modelId, systemPrompt, userPrompt) {
           { role: "user", content: userPrompt },
         ],
       }),
-    });
+      timeoutMs: DEFAULT_LLM_REQUEST_TIMEOUT_MS,
+      ...(agent ? { agent } : {}),
+    }, requestContext);
 
-    const data = await parseJsonResponse(response);
     if (!response.ok) {
-      throw new Error(`LLM request failed (${response.status}): ${JSON.stringify(data)}`);
+      throw new Error(
+        `LLM request failed (${response.status}) (${formatLlmContext(requestContext)}): ${JSON.stringify(response.data)}`,
+      );
     }
 
-    return extractOpenAIText(data, maxOutputTokens);
+    return extractOpenAIText(response.data, maxOutputTokens);
   }
 
   if (provider.apiType === "anthropic") {
     const anthropicVersion = provider.anthropicVersion || "2023-06-01";
-    const response = await fetch(endpoint, {
+    const response = await requestWithLlmDiagnostics(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -84,31 +246,20 @@ async function callLlmOnce(provider, modelId, systemPrompt, userPrompt) {
         system: systemPrompt,
         messages: [{ role: "user", content: userPrompt }],
       }),
-    });
+      timeoutMs: DEFAULT_LLM_REQUEST_TIMEOUT_MS,
+      ...(agent ? { agent } : {}),
+    }, requestContext);
 
-    const data = await parseJsonResponse(response);
     if (!response.ok) {
-      throw new Error(`LLM request failed (${response.status}): ${JSON.stringify(data)}`);
+      throw new Error(
+        `LLM request failed (${response.status}) (${formatLlmContext(requestContext)}): ${JSON.stringify(response.data)}`,
+      );
     }
 
-    return extractAnthropicText(data, maxOutputTokens);
+    return extractAnthropicText(response.data, maxOutputTokens);
   }
 
   throw new Error(`Unsupported LLM API type: ${provider.apiType}`);
-}
-
-async function parseJsonResponse(response) {
-  const raw = await response.text();
-
-  if (!raw) {
-    return { _raw: "" };
-  }
-
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return { _raw: raw };
-  }
 }
 
 function extractOpenAIText(data, maxOutputTokens) {

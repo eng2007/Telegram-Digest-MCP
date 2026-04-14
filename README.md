@@ -51,6 +51,11 @@ TELEGRAM_API_HASH=
 TELEGRAM_PROXY_HOST=
 TELEGRAM_PROXY_PORT=
 TELEGRAM_PROXY_SOCKS_TYPE=5
+LLM_PROXY_HOST=
+LLM_PROXY_PORT=
+LLM_PROXY_PROTOCOL=socks5
+LLM_PROXY_USERNAME=
+LLM_PROXY_PASSWORD=
 LLM_PROVIDER=opencode-go-openai
 LLM_MODEL=glm-5
 SUMMARY_LANGUAGE=en
@@ -111,6 +116,18 @@ TELEGRAM_PROXY_SOCKS_TYPE=5
 ```
 
 The project currently expects a SOCKS proxy, not a plain HTTP proxy.
+
+LLM proxy settings are separate from Telegram and do not fall back to `TELEGRAM_PROXY_*`.
+
+If LLM traffic must also go through a SOCKS proxy, set:
+
+```env
+LLM_PROXY_HOST=127.0.0.1
+LLM_PROXY_PORT=1080
+LLM_PROXY_PROTOCOL=socks5
+LLM_PROXY_USERNAME=
+LLM_PROXY_PASSWORD=
+```
 
 ## CLI Usage
 

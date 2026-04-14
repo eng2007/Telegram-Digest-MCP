@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 
 import { SUMMARY_LANGUAGES } from "../config/summary-languages.js";
+import { buildLlmProxyUrl, describeLlmError } from "../src/lib/summarizer.js";
 import {
   buildPromptLanguageVariables,
   buildStructuredSummary,
@@ -132,6 +133,67 @@ test("chunkMessages uses senderLabel in serialized lines", () => {
 
   assert.equal(chunks.length, 1);
   assert.match(chunks[0], /\] Ivan \(123\): Useful content$/);
+});
+
+test("buildLlmProxyUrl uses only LLM proxy settings and does not fall back to Telegram proxy", () => {
+  const previous = {
+    TELEGRAM_PROXY_HOST: process.env.TELEGRAM_PROXY_HOST,
+    TELEGRAM_PROXY_PORT: process.env.TELEGRAM_PROXY_PORT,
+    LLM_PROXY_HOST: process.env.LLM_PROXY_HOST,
+    LLM_PROXY_PORT: process.env.LLM_PROXY_PORT,
+    LLM_PROXY_PROTOCOL: process.env.LLM_PROXY_PROTOCOL,
+    LLM_PROXY_USERNAME: process.env.LLM_PROXY_USERNAME,
+    LLM_PROXY_PASSWORD: process.env.LLM_PROXY_PASSWORD,
+  };
+
+  try {
+    process.env.TELEGRAM_PROXY_HOST = "127.0.0.1";
+    process.env.TELEGRAM_PROXY_PORT = "9050";
+    delete process.env.LLM_PROXY_HOST;
+    delete process.env.LLM_PROXY_PORT;
+    delete process.env.LLM_PROXY_PROTOCOL;
+    delete process.env.LLM_PROXY_USERNAME;
+    delete process.env.LLM_PROXY_PASSWORD;
+
+    assert.equal(buildLlmProxyUrl(), undefined);
+
+    process.env.LLM_PROXY_HOST = "10.0.0.5";
+    process.env.LLM_PROXY_PORT = "1080";
+    process.env.LLM_PROXY_PROTOCOL = "socks5";
+    process.env.LLM_PROXY_USERNAME = "alice";
+    process.env.LLM_PROXY_PASSWORD = "p@ss word";
+
+    assert.equal(buildLlmProxyUrl(), "socks5://alice:p%40ss%20word@10.0.0.5:1080");
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+});
+
+test("describeLlmError includes provider, endpoint, proxy mode and nested cause details", () => {
+  const rootCause = new Error("other side closed");
+  rootCause.code = "UND_ERR_SOCKET";
+
+  const error = new TypeError("fetch failed", { cause: rootCause });
+  const message = describeLlmError(error, {
+    providerId: "litellm-baza-nomerov",
+    modelId: "minimax25",
+    endpoint: "https://litellm.baza-nomerov.ru/v1/chat/completions",
+    proxyEnabled: true,
+    timeoutMs: 120000,
+  });
+
+  assert.match(message, /provider=litellm-baza-nomerov/);
+  assert.match(message, /model=minimax25/);
+  assert.match(message, /endpoint=https:\/\/litellm\.baza-nomerov\.ru\/v1\/chat\/completions/);
+  assert.match(message, /proxy=configured/);
+  assert.match(message, /cause=UND_ERR_SOCKET/);
+  assert.match(message, /detail=other side closed/);
 });
 
 test("buildStructuredSummary extracts useful info and useful links sections", () => {

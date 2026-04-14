@@ -24,6 +24,7 @@ export const DEFAULT_SUMMARY_CONCURRENCY = Number(process.env.SUMMARY_CONCURRENC
 export const DEFAULT_MERGE_WINDOW_MINUTES = Number(process.env.MERGE_WINDOW_MINUTES || 10);
 export const DEFAULT_RUN_MODE = process.env.RUN_MODE || "full";
 export const DEFAULT_LLM_MAX_OUTPUT_TOKENS = Number(process.env.LLM_MAX_OUTPUT_TOKENS || 8000);
+export const DEFAULT_LLM_REQUEST_TIMEOUT_MS = Number(process.env.LLM_REQUEST_TIMEOUT_MS || 120_000);
 export const OUTPUT_FORMATS = ["messages", "markdown", "structured", "html"];
 
 export function requireEnv(name) {
@@ -53,7 +54,8 @@ export async function loadLlmProviders() {
 
   return providers.map((provider) => ({
     ...provider,
-    apiKey: provider.apiKeyEnv ? process.env[provider.apiKeyEnv] || "" : "",
+    endpoint: provider.endpoint || provider.apiUrl || "",
+    apiKey: provider.apiKey || (provider.apiKeyEnv ? process.env[provider.apiKeyEnv] || "" : ""),
   }));
 }
 
