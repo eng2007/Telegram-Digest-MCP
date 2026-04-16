@@ -11,15 +11,33 @@ import {
   getPeriodStart,
   requireEnv,
 } from "./config.js";
+import { HttpProxyPromisedNetSockets } from "./http-proxy-socket.js";
 
 import fs from "node:fs/promises";
+
+export function resolveTelegramProxyProtocol() {
+  const protocol = String(process.env.TELEGRAM_PROXY_PROTOCOL || "")
+    .trim()
+    .toLowerCase();
+  const socksType = Number(process.env.TELEGRAM_PROXY_SOCKS_TYPE || 5);
+
+  if (!protocol) {
+    return socksType === 4 ? "socks4" : "socks5";
+  }
+
+  if (["http", "https", "socks4", "socks5", "socks5h", "socks"].includes(protocol)) {
+    return protocol === "socks" || protocol === "socks5h" ? "socks5" : protocol;
+  }
+
+  throw new Error("TELEGRAM_PROXY_PROTOCOL must be one of: http, https, socks4, socks5.");
+}
 
 export function getTelegramProxy() {
   const host = process.env.TELEGRAM_PROXY_HOST?.trim();
   const port = Number(process.env.TELEGRAM_PROXY_PORT || "");
-  const socksType = Number(process.env.TELEGRAM_PROXY_SOCKS_TYPE || 5);
   const username = process.env.TELEGRAM_PROXY_USERNAME?.trim();
   const password = process.env.TELEGRAM_PROXY_PASSWORD?.trim();
+  const protocol = resolveTelegramProxyProtocol();
 
   if (!host) {
     return undefined;
@@ -28,6 +46,19 @@ export function getTelegramProxy() {
   if (!Number.isFinite(port) || port <= 0) {
     throw new Error("TELEGRAM_PROXY_PORT must be a positive number when TELEGRAM_PROXY_HOST is set.");
   }
+
+  if (protocol === "http" || protocol === "https") {
+    return {
+      ip: host,
+      port,
+      protocol,
+      username: username || undefined,
+      password: password || undefined,
+      timeout: 10,
+    };
+  }
+
+  const socksType = protocol === "socks4" ? 4 : Number(process.env.TELEGRAM_PROXY_SOCKS_TYPE || 5);
 
   if (socksType !== 4 && socksType !== 5) {
     throw new Error("TELEGRAM_PROXY_SOCKS_TYPE must be 4 or 5.");
@@ -39,6 +70,29 @@ export function getTelegramProxy() {
     socksType,
     username: username || undefined,
     password: password || undefined,
+  };
+}
+
+export function getTelegramClientOptions() {
+  const proxy = getTelegramProxy();
+
+  if (!proxy) {
+    return {
+      connectionRetries: 5,
+    };
+  }
+
+  if (proxy.protocol === "http" || proxy.protocol === "https") {
+    return {
+      connectionRetries: 5,
+      proxy,
+      networkSocket: HttpProxyPromisedNetSockets,
+    };
+  }
+
+  return {
+    connectionRetries: 5,
+    proxy,
   };
 }
 
@@ -59,12 +113,12 @@ export async function connectTelegram() {
   const apiId = Number(requireEnv("TELEGRAM_API_ID"));
   const apiHash = requireEnv("TELEGRAM_API_HASH");
   const sessionString = await readSessionString();
-  const proxy = getTelegramProxy();
-
-  const client = new TelegramClient(new StringSession(sessionString), apiId, apiHash, {
-    connectionRetries: 5,
-    proxy,
-  });
+  const client = new TelegramClient(
+    new StringSession(sessionString),
+    apiId,
+    apiHash,
+    getTelegramClientOptions(),
+  );
 
   await client.start({
     phoneNumber: async () => input.text("Telegram phone number: "),

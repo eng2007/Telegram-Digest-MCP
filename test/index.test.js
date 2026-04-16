@@ -9,6 +9,8 @@ import {
   buildStructuredSummary,
   chunkMessages,
   formatMessage,
+  getTelegramClientOptions,
+  getTelegramProxy,
   preprocessMessages,
   resolveOutputFormats,
   resolveRunMode,
@@ -164,6 +166,80 @@ test("buildLlmProxyUrl uses only LLM proxy settings and does not fall back to Te
     process.env.LLM_PROXY_PASSWORD = "p@ss word";
 
     assert.equal(buildLlmProxyUrl(), "socks5://alice:p%40ss%20word@10.0.0.5:1080");
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+});
+
+test("getTelegramProxy supports HTTP proxy settings for Telegram", () => {
+  const previous = {
+    TELEGRAM_PROXY_PROTOCOL: process.env.TELEGRAM_PROXY_PROTOCOL,
+    TELEGRAM_PROXY_HOST: process.env.TELEGRAM_PROXY_HOST,
+    TELEGRAM_PROXY_PORT: process.env.TELEGRAM_PROXY_PORT,
+    TELEGRAM_PROXY_USERNAME: process.env.TELEGRAM_PROXY_USERNAME,
+    TELEGRAM_PROXY_PASSWORD: process.env.TELEGRAM_PROXY_PASSWORD,
+    TELEGRAM_PROXY_SOCKS_TYPE: process.env.TELEGRAM_PROXY_SOCKS_TYPE,
+  };
+
+  try {
+    process.env.TELEGRAM_PROXY_PROTOCOL = "http";
+    process.env.TELEGRAM_PROXY_HOST = "127.0.0.1";
+    process.env.TELEGRAM_PROXY_PORT = "8080";
+    process.env.TELEGRAM_PROXY_USERNAME = "alice";
+    process.env.TELEGRAM_PROXY_PASSWORD = "secret";
+
+    assert.deepEqual(getTelegramProxy(), {
+      ip: "127.0.0.1",
+      port: 8080,
+      protocol: "http",
+      username: "alice",
+      password: "secret",
+      timeout: 10,
+    });
+    assert.equal(getTelegramClientOptions().networkSocket?.name, "HttpProxyPromisedNetSockets");
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+});
+
+test("getTelegramProxy keeps SOCKS configuration compatible", () => {
+  const previous = {
+    TELEGRAM_PROXY_PROTOCOL: process.env.TELEGRAM_PROXY_PROTOCOL,
+    TELEGRAM_PROXY_HOST: process.env.TELEGRAM_PROXY_HOST,
+    TELEGRAM_PROXY_PORT: process.env.TELEGRAM_PROXY_PORT,
+    TELEGRAM_PROXY_USERNAME: process.env.TELEGRAM_PROXY_USERNAME,
+    TELEGRAM_PROXY_PASSWORD: process.env.TELEGRAM_PROXY_PASSWORD,
+    TELEGRAM_PROXY_SOCKS_TYPE: process.env.TELEGRAM_PROXY_SOCKS_TYPE,
+  };
+
+  try {
+    process.env.TELEGRAM_PROXY_PROTOCOL = "socks5";
+    process.env.TELEGRAM_PROXY_HOST = "127.0.0.1";
+    process.env.TELEGRAM_PROXY_PORT = "9050";
+    process.env.TELEGRAM_PROXY_USERNAME = "bob";
+    process.env.TELEGRAM_PROXY_PASSWORD = "pwd";
+    process.env.TELEGRAM_PROXY_SOCKS_TYPE = "5";
+
+    assert.deepEqual(getTelegramProxy(), {
+      ip: "127.0.0.1",
+      port: 9050,
+      socksType: 5,
+      username: "bob",
+      password: "pwd",
+    });
+    assert.equal(getTelegramClientOptions().networkSocket, undefined);
   } finally {
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) {

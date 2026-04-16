@@ -48,9 +48,12 @@ npm install
 ```env
 TELEGRAM_API_ID=
 TELEGRAM_API_HASH=
+TELEGRAM_PROXY_PROTOCOL=
 TELEGRAM_PROXY_HOST=
 TELEGRAM_PROXY_PORT=
 TELEGRAM_PROXY_SOCKS_TYPE=5
+TELEGRAM_PROXY_USERNAME=
+TELEGRAM_PROXY_PASSWORD=
 LLM_PROXY_HOST=
 LLM_PROXY_PORT=
 LLM_PROXY_PROTOCOL=socks5
@@ -107,15 +110,22 @@ npm run mcp
 
 ## Installation Notes
 
-If Telegram access must go through a local SOCKS proxy, also set:
+If Telegram access must go through a local SOCKS proxy, set:
 
 ```env
+TELEGRAM_PROXY_PROTOCOL=socks5
 TELEGRAM_PROXY_HOST=127.0.0.1
 TELEGRAM_PROXY_PORT=8080
 TELEGRAM_PROXY_SOCKS_TYPE=5
 ```
 
-The project currently expects a SOCKS proxy, not a plain HTTP proxy.
+If Telegram access must go through a plain HTTP proxy such as `opera-proxy`, set:
+
+```env
+TELEGRAM_PROXY_PROTOCOL=http
+TELEGRAM_PROXY_HOST=127.0.0.1
+TELEGRAM_PROXY_PORT=8080
+```
 
 LLM proxy settings are separate from Telegram and do not fall back to `TELEGRAM_PROXY_*`.
 
@@ -344,7 +354,8 @@ If MCP says there is no Telegram session:
 If Telegram hangs on connect:
 
 - check proxy settings
-- confirm you are using SOCKS rather than plain HTTP proxy
+- if you use a plain local HTTP proxy, set `TELEGRAM_PROXY_PROTOCOL=http`
+- if you use SOCKS, set `TELEGRAM_PROXY_PROTOCOL=socks5` (or `socks4`)
 
 If summaries are truncated:
 
