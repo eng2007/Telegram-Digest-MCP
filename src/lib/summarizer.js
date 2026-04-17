@@ -1,5 +1,7 @@
 import http from "node:http";
 import https from "node:https";
+import net from "node:net";
+import tls from "node:tls";
 
 import { SocksProxyAgent } from "socks-proxy-agent";
 
@@ -40,8 +42,8 @@ export function buildLlmProxyUrl() {
     throw new Error("LLM_PROXY_PASSWORD requires LLM_PROXY_USERNAME.");
   }
 
-  if (!["socks", "socks4", "socks4a", "socks5", "socks5h"].includes(protocol)) {
-    throw new Error("LLM_PROXY_PROTOCOL must be one of: socks, socks4, socks4a, socks5, socks5h.");
+  if (!["http", "https", "socks", "socks4", "socks4a", "socks5", "socks5h"].includes(protocol)) {
+    throw new Error("LLM_PROXY_PROTOCOL must be one of: http, https, socks, socks4, socks4a, socks5, socks5h.");
   }
 
   const credentials = username
@@ -51,12 +53,221 @@ export function buildLlmProxyUrl() {
   return `${protocol}://${credentials}${host}:${port}`;
 }
 
-function createProxyAgent() {
+function buildProxyAuthorizationHeader(username, password) {
+  if (!username) {
+    return null;
+  }
+
+  const token = Buffer.from(`${username}:${password || ""}`, "utf8").toString("base64");
+  return `Basic ${token}`;
+}
+
+function createHttpProxySocket(proxy) {
+  const options = {
+    host: proxy.host,
+    port: proxy.port,
+  };
+
+  return proxy.protocol === "https" ? tls.connect(options) : net.connect(options);
+}
+
+function waitForSocketConnect(socket, protocol, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const connectEvent = protocol === "https" ? "secureConnect" : "connect";
+
+    const cleanup = () => {
+      socket.setTimeout(0);
+      socket.off(connectEvent, onConnect);
+      socket.off("error", onError);
+      socket.off("timeout", onTimeout);
+    };
+
+    const onConnect = () => {
+      cleanup();
+      resolve();
+    };
+
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+
+    const onTimeout = () => {
+      cleanup();
+      reject(new Error("Timed out while connecting to the LLM proxy."));
+    };
+
+    socket.setTimeout(timeoutMs);
+    socket.once(connectEvent, onConnect);
+    socket.once("error", onError);
+    socket.once("timeout", onTimeout);
+  });
+}
+
+function establishHttpTunnel(socket, destination, proxy, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const headers = [
+      `CONNECT ${destination.host}:${destination.port} HTTP/1.1`,
+      `Host: ${destination.host}:${destination.port}`,
+      "Connection: close",
+      "Proxy-Connection: close",
+    ];
+    const authHeader = buildProxyAuthorizationHeader(proxy.username, proxy.password);
+
+    if (authHeader) {
+      headers.push(`Proxy-Authorization: ${authHeader}`);
+    }
+
+    const cleanup = () => {
+      socket.setTimeout(0);
+      socket.off("data", onData);
+      socket.off("error", onError);
+      socket.off("timeout", onTimeout);
+      socket.off("close", onClose);
+    };
+
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+
+    const onTimeout = () => {
+      cleanup();
+      reject(new Error("Timed out while establishing the LLM proxy tunnel."));
+    };
+
+    const onClose = () => {
+      cleanup();
+      reject(new Error("LLM proxy closed the connection before the CONNECT tunnel was established."));
+    };
+
+    let response = Buffer.alloc(0);
+
+    const onData = (chunk) => {
+      response = Buffer.concat([response, chunk]);
+      const headerEnd = response.indexOf("\r\n\r\n");
+
+      if (headerEnd === -1) {
+        return;
+      }
+
+      cleanup();
+      const headerText = response.subarray(0, headerEnd).toString("utf8");
+      const statusLine = headerText.split("\r\n", 1)[0] || "";
+
+      if (!/^HTTP\/1\.[01] 200\b/i.test(statusLine)) {
+        reject(new Error(`LLM proxy CONNECT failed: ${statusLine || "unknown response"}`));
+        return;
+      }
+
+      resolve(response.subarray(headerEnd + 4));
+    };
+
+    socket.setTimeout(timeoutMs);
+    socket.on("data", onData);
+    socket.once("error", onError);
+    socket.once("timeout", onTimeout);
+    socket.once("close", onClose);
+    socket.write(`${headers.join("\r\n")}\r\n\r\n`);
+  });
+}
+
+function createHttpTunnelConnection(options, callback, proxy, secureEndpoint, timeoutMs) {
+  const destinationHost = options.hostname || options.host || options.servername;
+  const destinationPort = Number(options.port || (secureEndpoint ? 443 : 80));
+
+  if (!destinationHost || !Number.isFinite(destinationPort) || destinationPort <= 0) {
+    callback(new Error("Invalid LLM destination for proxy tunnel."));
+    return;
+  }
+
+  const proxySocket = createHttpProxySocket(proxy);
+
+  (async () => {
+    try {
+      await waitForSocketConnect(proxySocket, proxy.protocol, timeoutMs);
+      const remainder = await establishHttpTunnel(
+        proxySocket,
+        { host: destinationHost, port: destinationPort },
+        proxy,
+        timeoutMs,
+      );
+
+      if (!secureEndpoint) {
+        if (remainder.length > 0) {
+          proxySocket.unshift(remainder);
+        }
+
+        callback(null, proxySocket);
+        return;
+      }
+
+      const tlsSocket = tls.connect({
+        socket: proxySocket,
+        servername: options.servername || options.hostname || destinationHost,
+      });
+
+      await waitForSocketConnect(tlsSocket, "https", timeoutMs);
+      if (remainder.length > 0) {
+        tlsSocket.unshift(remainder);
+      }
+
+      callback(null, tlsSocket);
+    } catch (error) {
+      proxySocket.destroy();
+      callback(error);
+    }
+  })();
+}
+
+class HttpConnectProxyAgent extends http.Agent {
+  constructor(proxy, timeoutMs) {
+    super({ keepAlive: false });
+    this.proxy = proxy;
+    this.timeoutMs = timeoutMs;
+  }
+
+  createConnection(options, callback) {
+    createHttpTunnelConnection(options, callback, this.proxy, false, this.timeoutMs);
+  }
+}
+
+class HttpsConnectProxyAgent extends https.Agent {
+  constructor(proxy, timeoutMs) {
+    super({ keepAlive: false });
+    this.proxy = proxy;
+    this.timeoutMs = timeoutMs;
+  }
+
+  createConnection(options, callback) {
+    createHttpTunnelConnection(options, callback, this.proxy, true, this.timeoutMs);
+  }
+}
+
+function createProxyAgent(endpoint) {
   const proxyUrl = buildLlmProxyUrl();
   if (!proxyUrl) {
     return undefined;
   }
-  return new SocksProxyAgent(proxyUrl);
+
+  const proxy = new URL(proxyUrl);
+  const protocol = proxy.protocol.replace(/:$/, "");
+
+  if (protocol.startsWith("socks")) {
+    return new SocksProxyAgent(proxyUrl);
+  }
+
+  const proxySettings = {
+    protocol,
+    host: proxy.hostname,
+    port: Number(proxy.port),
+    username: proxy.username ? decodeURIComponent(proxy.username) : undefined,
+    password: proxy.password ? decodeURIComponent(proxy.password) : undefined,
+  };
+
+  return endpoint.startsWith("https:")
+    ? new HttpsConnectProxyAgent(proxySettings, DEFAULT_LLM_REQUEST_TIMEOUT_MS)
+    : new HttpConnectProxyAgent(proxySettings, DEFAULT_LLM_REQUEST_TIMEOUT_MS);
 }
 
 function formatLlmContext({ providerId, modelId, endpoint, proxyEnabled }) {
@@ -109,6 +320,10 @@ async function sendJsonRequest(endpoint, options) {
   const transport = url.protocol === "https:" ? https : http;
 
   return await new Promise((resolve, reject) => {
+    const finalize = () => {
+      options.agent?.destroy?.();
+    };
+
     const request = transport.request(url, {
       method: options.method || "GET",
       headers: options.headers,
@@ -122,7 +337,10 @@ async function sendJsonRequest(endpoint, options) {
       });
     }
 
-    request.on("error", reject);
+    request.on("error", (error) => {
+      finalize();
+      reject(error);
+    });
 
     request.on("response", (response) => {
       const chunks = [];
@@ -132,6 +350,7 @@ async function sendJsonRequest(endpoint, options) {
       });
 
       response.on("end", () => {
+        finalize();
         const raw = Buffer.concat(chunks).toString("utf8");
         let data;
 
@@ -194,7 +413,7 @@ async function callLlmOnce(provider, modelId, systemPrompt, userPrompt) {
   const maxOutputTokens = Number.isFinite(DEFAULT_LLM_MAX_OUTPUT_TOKENS) && DEFAULT_LLM_MAX_OUTPUT_TOKENS > 0
     ? DEFAULT_LLM_MAX_OUTPUT_TOKENS
     : 8000;
-  const agent = createProxyAgent();
+  const agent = createProxyAgent(endpoint);
   const requestContext = {
     providerId: provider.id,
     modelId,

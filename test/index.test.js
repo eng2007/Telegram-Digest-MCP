@@ -1,11 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
+import http from "node:http";
+import net from "node:net";
 
 import { SUMMARY_LANGUAGES } from "../config/summary-languages.js";
 import { buildLlmProxyUrl, describeLlmError } from "../src/lib/summarizer.js";
 import {
   buildPromptLanguageVariables,
+  callLlm,
   buildStructuredSummary,
   chunkMessages,
   formatMessage,
@@ -166,7 +169,120 @@ test("buildLlmProxyUrl uses only LLM proxy settings and does not fall back to Te
     process.env.LLM_PROXY_PASSWORD = "p@ss word";
 
     assert.equal(buildLlmProxyUrl(), "socks5://alice:p%40ss%20word@10.0.0.5:1080");
+
+    process.env.LLM_PROXY_PROTOCOL = "http";
+    process.env.LLM_PROXY_PORT = "8080";
+
+    assert.equal(buildLlmProxyUrl(), "http://alice:p%40ss%20word@10.0.0.5:8080");
   } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+});
+
+test("callLlm supports HTTP proxy settings for LLM requests", async () => {
+  const previous = {
+    LLM_PROXY_HOST: process.env.LLM_PROXY_HOST,
+    LLM_PROXY_PORT: process.env.LLM_PROXY_PORT,
+    LLM_PROXY_PROTOCOL: process.env.LLM_PROXY_PROTOCOL,
+    LLM_PROXY_USERNAME: process.env.LLM_PROXY_USERNAME,
+    LLM_PROXY_PASSWORD: process.env.LLM_PROXY_PASSWORD,
+  };
+
+  let proxyAuthorization;
+  let targetRequestBody;
+
+  const targetServer = http.createServer((req, res) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+    req.on("end", () => {
+      targetRequestBody = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          choices: [
+            {
+              finish_reason: "stop",
+              message: {
+                content: "Proxy works",
+              },
+            },
+          ],
+        }),
+      );
+    });
+  });
+
+  const proxyServer = http.createServer((req, res) => {
+    res.writeHead(500, { "Content-Type": "text/plain" });
+    res.end("Expected CONNECT tunneling");
+  });
+
+  proxyServer.on("connect", (req, clientSocket, head) => {
+    proxyAuthorization = req.headers["proxy-authorization"];
+    const [host, portRaw] = String(req.url || "").split(":");
+    const upstream = net.connect(Number(portRaw), host, () => {
+      clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+      if (head.length > 0) {
+        upstream.write(head);
+      }
+      upstream.pipe(clientSocket);
+      clientSocket.pipe(upstream);
+    });
+
+    const closeSockets = () => {
+      upstream.destroy();
+      clientSocket.destroy();
+    };
+
+    upstream.on("error", closeSockets);
+    clientSocket.on("error", closeSockets);
+  });
+
+  try {
+    await new Promise((resolve) => targetServer.listen(0, "127.0.0.1", resolve));
+    await new Promise((resolve) => proxyServer.listen(0, "127.0.0.1", resolve));
+
+    const targetAddress = targetServer.address();
+    const proxyAddress = proxyServer.address();
+
+    process.env.LLM_PROXY_HOST = "127.0.0.1";
+    process.env.LLM_PROXY_PORT = String(proxyAddress.port);
+    process.env.LLM_PROXY_PROTOCOL = "http";
+    process.env.LLM_PROXY_USERNAME = "alice";
+    process.env.LLM_PROXY_PASSWORD = "secret";
+
+    const summary = await callLlm(
+      {
+        id: "test-openai",
+        apiType: "openai",
+        endpoint: `http://127.0.0.1:${targetAddress.port}/v1/chat/completions`,
+        apiKey: "test-key",
+      },
+      "test-model",
+      "system prompt",
+      "user prompt",
+    );
+
+    assert.equal(summary, "Proxy works");
+    assert.equal(
+      proxyAuthorization,
+      `Basic ${Buffer.from("alice:secret", "utf8").toString("base64")}`,
+    );
+    assert.equal(targetRequestBody.model, "test-model");
+    assert.equal(targetRequestBody.messages[0].content, "system prompt");
+    assert.equal(targetRequestBody.messages[1].content, "user prompt");
+  } finally {
+    await Promise.all([
+      new Promise((resolve) => targetServer.close(resolve)),
+      new Promise((resolve) => proxyServer.close(resolve)),
+    ]);
+
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) {
         delete process.env[key];

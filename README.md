@@ -129,7 +129,17 @@ TELEGRAM_PROXY_PORT=8080
 
 LLM proxy settings are separate from Telegram and do not fall back to `TELEGRAM_PROXY_*`.
 
-If LLM traffic must also go through a SOCKS proxy, set:
+If LLM traffic must go through a plain HTTP proxy, set:
+
+```env
+LLM_PROXY_HOST=127.0.0.1
+LLM_PROXY_PORT=8080
+LLM_PROXY_PROTOCOL=http
+LLM_PROXY_USERNAME=
+LLM_PROXY_PASSWORD=
+```
+
+If LLM traffic must go through a SOCKS proxy, set:
 
 ```env
 LLM_PROXY_HOST=127.0.0.1
@@ -360,6 +370,11 @@ If Telegram hangs on connect:
 If summaries are truncated:
 
 - increase `LLM_MAX_OUTPUT_TOKENS`
+
+If LLM requests need a proxy:
+
+- for a plain local HTTP proxy, set `LLM_PROXY_PROTOCOL=http`
+- for SOCKS, set `LLM_PROXY_PROTOCOL=socks5` (or `socks4`)
 
 If provider/model resolution fails:
 
