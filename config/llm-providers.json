@@ -1,0 +1,41 @@
+{
+  "providers": [
+    {
+      "id": "opencode-go-openai",
+      "label": "OpenCode GO OpenAI",
+      "apiType": "openai",
+      "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+      "apiKeyEnv": "GO_API_KEY",
+      "defaultModel": "glm-5",
+      "models": [
+        {
+          "id": "glm-5",
+          "label": "GLM-5"
+        },
+        {
+          "id": "kimi-k2.5",
+          "label": "Kimi K2.5"
+        }
+      ]
+    },
+    {
+      "id": "opencode-go-anthropic",
+      "label": "OpenCode GO Anthropic",
+      "apiType": "anthropic",
+      "endpoint": "https://opencode.ai/zen/go/v1/messages",
+      "apiKeyEnv": "GO_API_KEY",
+      "anthropicVersion": "2023-06-01",
+      "defaultModel": "minimax-m2.7",
+      "models": [
+        {
+          "id": "minimax-m2.7",
+          "label": "MiniMax M2.7"
+        },
+        {
+          "id": "minimax-m2.5",
+          "label": "MiniMax M2.5"
+        }
+      ]
+    }
+  ]
+}
