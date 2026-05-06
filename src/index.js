@@ -122,11 +122,6 @@ async function chooseDialog(client, args, dialogPeriod) {
     throw new Error("No dialogs available for the selected activity period.");
   }
 
-  console.log("\nAvailable dialogs:");
-  for (const dialog of dialogs) {
-    console.log(`${dialog.index}. ${dialog.title} [id=${dialog.id}] unread=${dialog.unreadCount}`);
-  }
-
   if (args.chat) {
     const normalizedInput = String(args.chat).normalize("NFKC").toLowerCase();
     const matched = dialogs.find((dialog) => {
@@ -143,7 +138,12 @@ async function chooseDialog(client, args, dialogPeriod) {
       return matched;
     }
 
-    throw new Error(`Dialog "${args.chat}" not found. Available dialogs are listed above.`);
+    throw new Error(`Dialog "${args.chat}" not found. Run without --chat to choose from the available dialogs.`);
+  }
+
+  console.log("\nAvailable dialogs:");
+  for (const dialog of dialogs) {
+    console.log(`${dialog.index}. ${dialog.title} [id=${dialog.id}] unread=${dialog.unreadCount}`);
   }
 
   const selected = await input.text("\nChoose dialog number: ");
