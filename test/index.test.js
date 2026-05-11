@@ -7,10 +7,12 @@ import net from "node:net";
 import { SUMMARY_LANGUAGES } from "../config/summary-languages.js";
 import { buildLlmProxyUrl, describeLlmError } from "../src/lib/summarizer.js";
 import {
+  buildProfileLinkAnalysisUserPrompt,
   buildPromptLanguageVariables,
   callLlm,
   buildStructuredSummary,
   chunkMessages,
+  extractProfileLinksFromText,
   formatMessage,
   getTelegramClientOptions,
   getTelegramProxy,
@@ -418,6 +420,8 @@ test("buildStructuredSummary extracts useful info and useful links sections", ()
 - Лучше запускать incremental mode на длинных чатах
 ## Полезные ссылки
 - https://example.com/docs — документация
+## Ссылки из профилей
+- @seller — https://seller.example.com — продает консультации
 ## Action items
 - Сделать задачу
 ## Открытые вопросы
@@ -446,12 +450,52 @@ test("buildStructuredSummary extracts useful info and useful links sections", ()
   assert.equal(structured.language, "ru");
   assert.equal(structured.sections.usefulInfo, "- Лучше запускать incremental mode на длинных чатах");
   assert.equal(structured.sections.usefulLinks, "- https://example.com/docs — документация");
+  assert.equal(structured.sections.profileLinks, "- @seller — https://seller.example.com — продает консультации");
   assert.deepEqual(structured.parsed.usefulInfo, [
     "Лучше запускать incremental mode на длинных чатах",
   ]);
   assert.deepEqual(structured.parsed.usefulLinks, [
     "https://example.com/docs — документация",
   ]);
+  assert.deepEqual(structured.parsed.profileLinks, [
+    "@seller — https://seller.example.com — продает консультации",
+  ]);
+});
+
+test("extractProfileLinksFromText normalizes profile links and telegram handles", () => {
+  assert.deepEqual(extractProfileLinksFromText("Bio: example.com, t.me/shop and @seller_bot"), [
+    { raw: "example.com", url: "https://example.com" },
+    { raw: "t.me/shop", url: "https://t.me/shop" },
+    { raw: "@seller_bot", url: "https://t.me/seller_bot" },
+  ]);
+});
+
+test("buildProfileLinkAnalysisUserPrompt includes profile text, links and author messages", () => {
+  const prompt = buildProfileLinkAnalysisUserPrompt(
+    [
+      {
+        senderId: "123",
+        displayName: "Seller",
+        username: "seller",
+        profileUrl: "https://t.me/seller",
+        about: "Selling AI subscriptions: https://seller.example.com",
+        links: [{ url: "https://seller.example.com" }],
+      },
+    ],
+    [
+      {
+        id: 1,
+        date: "2026-03-22T10:00:00.000Z",
+        senderId: "123",
+        senderLabel: "Seller (123)",
+        text: "I can help set up shared AI accounts.",
+      },
+    ],
+  );
+
+  assert.match(prompt, /Selling AI subscriptions/);
+  assert.match(prompt, /https:\/\/seller\.example\.com/);
+  assert.match(prompt, /shared AI accounts/);
 });
 
 test("resolveRunMode supports the documented aliases", () => {

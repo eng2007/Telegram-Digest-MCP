@@ -15,7 +15,7 @@
   "scripts": {
     "start": "node src/index.js",
     "mcp": "node src/mcp-server.js",
-    "check": "node --check src/index.js && node --check src/mcp-server.js",
+    "check": "node --check src/index.js && node --check src/mcp-server.js && node --check src/lib/profile-links.js",
     "test": "node --test"
   },
   "keywords": [

@@ -16,6 +16,8 @@ export const SESSION_FILE = path.join(ROOT_DIR, ".telegram-session.txt");
 export const PROMPTS_FILE = path.join(ROOT_DIR, "config", "summary-prompts.json");
 export const LLM_PROVIDERS_FILE = path.join(ROOT_DIR, "config", "llm-providers.json");
 export const CACHE_DIR = path.join(ROOT_DIR, ".cache", "summary-chunks");
+export const PROFILE_CACHE_DIR = path.join(ROOT_DIR, ".cache", "telegram-profiles");
+export const PROFILE_CACHE_FILE = path.join(PROFILE_CACHE_DIR, "profiles.json");
 export const STATE_DIR = path.join(ROOT_DIR, ".state");
 export const CHECKPOINTS_FILE = path.join(STATE_DIR, "checkpoints.json");
 
@@ -25,6 +27,13 @@ export const DEFAULT_MERGE_WINDOW_MINUTES = Number(process.env.MERGE_WINDOW_MINU
 export const DEFAULT_RUN_MODE = process.env.RUN_MODE || "full";
 export const DEFAULT_LLM_MAX_OUTPUT_TOKENS = Number(process.env.LLM_MAX_OUTPUT_TOKENS || 8000);
 export const DEFAULT_LLM_REQUEST_TIMEOUT_MS = Number(process.env.LLM_REQUEST_TIMEOUT_MS || 120_000);
+export const DEFAULT_PROFILE_CACHE_TTL_DAYS = Number(process.env.PROFILE_CACHE_TTL_DAYS || 14);
+export const DEFAULT_PROFILE_LINK_AUTHOR_MESSAGE_LIMIT = Number(
+  process.env.PROFILE_LINK_AUTHOR_MESSAGE_LIMIT || 25,
+);
+export const DEFAULT_PROFILE_LINK_AUTHOR_CHAR_LIMIT = Number(
+  process.env.PROFILE_LINK_AUTHOR_CHAR_LIMIT || 6000,
+);
 export const OUTPUT_FORMATS = ["messages", "markdown", "structured", "html"];
 
 export function requireEnv(name) {

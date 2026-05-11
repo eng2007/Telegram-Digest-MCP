@@ -37,6 +37,13 @@ import {
   saveOutputs,
 } from "./lib/reports.js";
 import {
+  collectProfileLinks,
+  extractProfileLinksFromText,
+  summarizeProfileLinks,
+  buildProfileLinkAnalysisUserPrompt,
+  buildProfileLinksMarkdown,
+} from "./lib/profile-links.js";
+import {
   buildPromptLanguageVariables,
   callLlm,
   chunkMessages,
@@ -61,6 +68,19 @@ import {
 } from "./lib/telegram.js";
 
 const __filename = fileURLToPath(import.meta.url);
+
+function resolveBooleanOption(value) {
+  if (value === undefined || value === null) {
+    return false;
+  }
+
+  if (value === true) {
+    return true;
+  }
+
+  const normalized = String(value).trim().toLowerCase();
+  return !["", "0", "false", "no", "off"].includes(normalized);
+}
 
 async function choosePeriod(args) {
   const argPeriod = resolvePeriod(args.period);
@@ -164,6 +184,9 @@ export async function runCli() {
   const outputFormats = resolveOutputFormats(
     args["output-format"] || args["output-formats"] || args.format || args.formats,
   );
+  const includeProfileLinks = resolveBooleanOption(
+    args["include-profile-links"] ?? args.includeProfileLinks ?? process.env.INCLUDE_PROFILE_LINKS,
+  );
 
   if (!Number.isFinite(messageLimit) || messageLimit <= 0) {
     throw new Error("Message limit must be a positive number.");
@@ -181,6 +204,9 @@ export async function runCli() {
     );
     console.log(`Summary language: ${summaryLanguage.nativeLabel} (${summaryLanguage.id})`);
     console.log(`Output formats: ${outputFormats.join(", ")}`);
+    if (includeProfileLinks) {
+      console.log("Profile link analysis: enabled");
+    }
     const dialogActivityPeriod = await chooseDialogActivityPeriod(args);
     console.log(`Dialog activity filter: ${describePeriod(dialogActivityPeriod)}`);
     const dialog = await chooseDialog(client, args, dialogActivityPeriod);
@@ -242,11 +268,44 @@ export async function runCli() {
     if (mergedGroups > 0) {
       console.log(`Merged ${mergedGroups} adjacent messages from the same sender.`);
     }
+
     console.log("Starting LLM summarization...");
     const summaryTitle =
       runMode === "changes" ? `${dialog.title} (changes since last summary)` : dialog.title;
     const summary = await summarizeMessages(filteredMessages, summaryTitle, llmSelection, summaryLanguage);
-    const files = await saveOutputs(dialog, filteredMessages, summary, summaryLanguage, outputFormats);
+
+    let profileLinksMarkdown = "";
+    let profileLinks = [];
+    if (includeProfileLinks) {
+      try {
+        console.log("Collecting sender profiles and profile links...");
+        const profileLinkResult = await collectProfileLinks(client, filteredMessages);
+        profileLinks = profileLinkResult.profilesWithLinks;
+        console.log(
+          `Checked ${profileLinkResult.checkedCount} sender profile(s): ${profileLinkResult.cacheHits} cache hit(s), ${profileLinkResult.fetchedCount} fetched, ${profileLinkResult.failedCount} failed.`,
+        );
+        if (profileLinkResult.linkCount > 0) {
+          console.log(`Found ${profileLinkResult.linkCount} link(s) in profile text. Analyzing owner offers...`);
+          profileLinksMarkdown = await summarizeProfileLinks(
+            profileLinkResult.profilesWithLinks,
+            filteredMessages,
+            llmSelection,
+            summaryLanguage,
+          );
+        } else {
+          console.log("No links found in sender profile text.");
+        }
+      } catch (error) {
+        console.warn(`Profile link analysis failed: ${error.message}. Continuing without profile links.`);
+        profileLinksMarkdown = "";
+        profileLinks = [];
+      }
+    }
+
+    const files = await saveOutputs(dialog, filteredMessages, summary, summaryLanguage, outputFormats, {
+      extraMarkdown: profileLinksMarkdown,
+      profileLinks,
+    });
     checkpoints[checkpointKey] = {
       dialogId: dialog.id,
       dialogTitle: dialog.title,
@@ -284,12 +343,16 @@ export {
   buildCheckpointKey,
   buildMarkdownReport,
   buildPromptLanguageVariables,
+  buildProfileLinkAnalysisUserPrompt,
+  buildProfileLinksMarkdown,
   buildStructuredSummary,
   callLlm,
   chunkMessages,
+  collectProfileLinks,
   connectTelegram,
   describePeriod,
   describeRunMode,
+  extractProfileLinksFromText,
   extractBulletItems,
   extractSection,
   fetchMessages,
@@ -322,6 +385,7 @@ export {
   saveOutputs,
   sleep,
   summarizeMessages,
+  summarizeProfileLinks,
   writeChunkCache,
   writeSessionString,
 };

@@ -90,8 +90,9 @@ export function extractBulletItems(sectionText) {
     .filter(Boolean);
 }
 
-export function buildMarkdownReport(dialog, messages, summary, language) {
+export function buildMarkdownReport(dialog, messages, summary, language, extraMarkdown = "") {
   const stats = buildStats(messages);
+  const body = [summary.trim(), String(extraMarkdown || "").trim()].filter(Boolean).join("\n\n");
   const statsBlock = [
     `## ${language.statsHeading}`,
     "",
@@ -103,11 +104,11 @@ export function buildMarkdownReport(dialog, messages, summary, language) {
     "",
   ].join("\n");
 
-  const toc = buildTableOfContents(summary, language);
-  return `${statsBlock}${toc}${summary}`.trim();
+  const toc = buildTableOfContents(body, language);
+  return `${statsBlock}${toc}${body}`.trim();
 }
 
-export function buildStructuredSummary(dialog, messages, summary, language) {
+export function buildStructuredSummary(dialog, messages, summary, language, extraData = {}) {
   const headings = language.headings;
   const highlights = extractSection(summary, headings.highlights);
   const people = extractSection(summary, headings.people);
@@ -118,6 +119,7 @@ export function buildStructuredSummary(dialog, messages, summary, language) {
   const risks = extractSection(summary, headings.risks);
   const usefulInfo = extractSection(summary, headings.usefulInfo);
   const usefulLinks = extractSection(summary, headings.usefulLinks);
+  const profileLinks = headings.profileLinks ? extractSection(summary, headings.profileLinks) : "";
   const actions = extractSection(summary, headings.actions);
   const urgentActions = extractSection(summary, headings.urgentActions);
   const openQuestions = extractSection(summary, headings.openQuestions);
@@ -142,6 +144,7 @@ export function buildStructuredSummary(dialog, messages, summary, language) {
       risks,
       usefulInfo,
       usefulLinks,
+      profileLinks,
       actions,
       urgentActions,
       openQuestions,
@@ -155,11 +158,13 @@ export function buildStructuredSummary(dialog, messages, summary, language) {
       deadlines: extractBulletItems(deadlines),
       usefulInfo: extractBulletItems(usefulInfo),
       usefulLinks: extractBulletItems(usefulLinks),
+      profileLinks: extractBulletItems(profileLinks),
       actions: extractBulletItems(actions),
       urgentActions: extractBulletItems(urgentActions),
       openQuestions: extractBulletItems(openQuestions),
       promises: extractBulletItems(promises),
     },
+    profileLinks: extraData.profileLinks || [],
     messages,
   };
 }
@@ -217,7 +222,14 @@ function buildHtmlReport(dialog, messages, markdownReport, language) {
 </html>`;
 }
 
-export async function saveOutputs(dialog, messages, summary, language, outputFormats = OUTPUT_FORMATS) {
+export async function saveOutputs(
+  dialog,
+  messages,
+  summary,
+  language,
+  outputFormats = OUTPUT_FORMATS,
+  extraData = {},
+) {
   await ensureDir(OUTPUT_DIR);
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -226,8 +238,8 @@ export async function saveOutputs(dialog, messages, summary, language, outputFor
   const summaryPath = path.join(OUTPUT_DIR, `${prefix}.summary.md`);
   const htmlPath = path.join(OUTPUT_DIR, `${prefix}.summary.html`);
   const structuredPath = path.join(OUTPUT_DIR, `${prefix}.summary.json`);
-  const markdownReport = buildMarkdownReport(dialog, messages, summary, language);
-  const structuredSummary = buildStructuredSummary(dialog, messages, markdownReport, language);
+  const markdownReport = buildMarkdownReport(dialog, messages, summary, language, extraData.extraMarkdown);
+  const structuredSummary = buildStructuredSummary(dialog, messages, markdownReport, language, extraData);
   const htmlReport = buildHtmlReport(dialog, messages, markdownReport, language);
   const selectedFormats = new Set(outputFormats);
 

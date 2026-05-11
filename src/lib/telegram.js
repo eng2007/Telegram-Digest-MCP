@@ -195,15 +195,36 @@ function formatSenderTitle(sender) {
   return "";
 }
 
-function formatSenderLabel(message) {
-  const senderId = message.senderId?.toString?.() || null;
-  const sender =
+function getMessageSender(message) {
+  return (
     message.sender ||
     message._sender ||
     message.chat ||
     message._chat ||
     message.inputChat ||
-    null;
+    null
+  );
+}
+
+function getSenderUsername(sender) {
+  if (!sender) {
+    return "";
+  }
+
+  if (typeof sender.username === "string" && sender.username.trim()) {
+    return sender.username.trim();
+  }
+
+  const activeUsername = Array.isArray(sender.usernames)
+    ? sender.usernames.find((item) => item?.active && typeof item.username === "string" && item.username.trim())
+    : null;
+
+  return activeUsername?.username?.trim() || "";
+}
+
+function formatSenderLabel(message) {
+  const senderId = message.senderId?.toString?.() || null;
+  const sender = getMessageSender(message);
   const senderTitle = formatSenderTitle(sender);
 
   if (senderTitle && senderId) {
@@ -222,11 +243,16 @@ function formatSenderLabel(message) {
 }
 
 export function formatMessage(message) {
+  const sender = getMessageSender(message);
+  const senderUsername = getSenderUsername(sender);
+
   return {
     id: message.id,
     date: normalizeMessageDate(message.date),
     senderId: message.senderId?.toString?.() || null,
     senderLabel: formatSenderLabel(message),
+    senderUsername: senderUsername || null,
+    senderProfileUrl: senderUsername ? `https://t.me/${senderUsername}` : null,
     text: normalizeText(message.message),
     views: typeof message.views === "number" ? message.views : null,
     forwards: typeof message.forwards === "number" ? message.forwards : null,

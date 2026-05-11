@@ -175,18 +175,23 @@ Optional flags:
 - `--mode` one of `full`, `incremental`, `changes`
 - `--period` one of `day`, `week`, `month`, `all`
 - `--output-format` one format or a comma-separated list: `messages`, `markdown`, `structured`, `html`, `all`
+- `--include-profile-links` fetch sender profiles, cache them, and add a separate report section for links found in profile text
 
 Examples:
 
 ```bash
 node src/index.js --chat "My Group" --period week --output-format html
 node src/index.js --chat "My Group" --period week --output-format markdown,html
+node src/index.js --chat "My Group" --period week --include-profile-links --output-format html
 ```
 
 Runtime settings:
 
 - `SUMMARY_CONCURRENCY` controls how many chunks are summarized in parallel
 - `LLM_MAX_OUTPUT_TOKENS` controls the maximum size of each LLM response
+- `PROFILE_CACHE_TTL_DAYS` controls how long cached Telegram profiles are reused, default `14`
+- `PROFILE_LINK_AUTHOR_MESSAGE_LIMIT` controls how many recent messages per author are used for profile-link analysis, default `25`
+- `PROFILE_LINK_AUTHOR_CHAR_LIMIT` controls the maximum message sample size per author, default `6000`
 
 ## Run Modes
 
