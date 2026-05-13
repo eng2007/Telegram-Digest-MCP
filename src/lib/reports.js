@@ -77,7 +77,7 @@ function buildStats(messages) {
 
 export function extractSection(markdown, heading) {
   const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = markdown.match(new RegExp(`^##\\s+${escaped}\\s*\\n([\\s\\S]*?)(?=^##\\s+|^#\\s+|\\Z)`, "m"));
+  const match = markdown.match(new RegExp(`^##\\s+${escaped}\\s*\\n([\\s\\S]*?)(?=^##\\s+|^#\\s+|(?![\\s\\S]))`, "m"));
   return match ? match[1].trim() : "";
 }
 
@@ -88,6 +88,41 @@ export function extractBulletItems(sectionText) {
     .filter((line) => line.startsWith("- "))
     .map((line) => line.slice(2).trim())
     .filter(Boolean);
+}
+
+export function extractTableItems(sectionText) {
+  const lines = String(sectionText || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("|"));
+
+  if (lines.length < 3) {
+    return [];
+  }
+
+  const rows = lines
+    .slice(2)
+    .filter((line) => !/^\|\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/u.test(line));
+
+  return rows
+    .map((line) =>
+      line
+        .split("|")
+        .slice(1, -1)
+        .map((cell) => cell.trim())
+        .filter(Boolean)
+        .join(" | "),
+    )
+    .filter(Boolean);
+}
+
+function extractSectionItems(sectionText) {
+  const bulletItems = extractBulletItems(sectionText);
+  if (bulletItems.length) {
+    return bulletItems;
+  }
+
+  return extractTableItems(sectionText);
 }
 
 export function buildMarkdownReport(dialog, messages, summary, language, extraMarkdown = "") {
@@ -158,7 +193,7 @@ export function buildStructuredSummary(dialog, messages, summary, language, extr
       deadlines: extractBulletItems(deadlines),
       usefulInfo: extractBulletItems(usefulInfo),
       usefulLinks: extractBulletItems(usefulLinks),
-      profileLinks: extractBulletItems(profileLinks),
+      profileLinks: extractSectionItems(profileLinks),
       actions: extractBulletItems(actions),
       urgentActions: extractBulletItems(urgentActions),
       openQuestions: extractBulletItems(openQuestions),

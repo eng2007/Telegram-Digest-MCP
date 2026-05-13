@@ -8,6 +8,7 @@ import { SUMMARY_LANGUAGES } from "../config/summary-languages.js";
 import { buildLlmProxyUrl, describeLlmError } from "../src/lib/summarizer.js";
 import {
   buildProfileLinkAnalysisUserPrompt,
+  buildProfileLinksMarkdown,
   buildPromptLanguageVariables,
   callLlm,
   buildStructuredSummary,
@@ -493,9 +494,57 @@ test("buildProfileLinkAnalysisUserPrompt includes profile text, links and author
     ],
   );
 
+  assert.match(prompt, /Preferred offer link: https:\/\/seller\.example\.com/);
+  assert.match(prompt, /Telegram profile URL: https:\/\/t\.me\/seller/);
   assert.match(prompt, /Selling AI subscriptions/);
   assert.match(prompt, /https:\/\/seller\.example\.com/);
   assert.match(prompt, /shared AI accounts/);
+});
+
+test("buildProfileLinksMarkdown wraps profile links into a markdown table", () => {
+  const markdown = buildProfileLinksMarkdown(
+    [
+      "| Owner | Main link | Telegram | Offer | Evidence |",
+      "| --- | --- | --- | --- | --- |",
+      "| 佩恩 火影 | [narutoai.store](https://www.narutoai.store/) | [@konohashop17](https://t.me/konohashop17) | GPT/Claude/Grok/Perplexity/Cursor, especially Pro 5x/20x | profile lists services and messages mention pro 5x $65 20x $110 |",
+    ].join("\n"),
+    SUMMARY_LANGUAGES.ru,
+  );
+
+  assert.match(markdown, /^## Ссылки из профилей/m);
+  assert.match(markdown, /\| Автор \| Основная ссылка \| Telegram \| Что предлагает \| Источник \|/);
+  assert.match(markdown, /\| 佩恩 火影 \| \[narutoai\.store\]\(https:\/\/www\.narutoai\.store\/\) \| \[@konohashop17\]\(https:\/\/t\.me\/konohashop17\) \|/);
+});
+
+test("buildStructuredSummary reads profile links from a markdown table", () => {
+  const language = SUMMARY_LANGUAGES.ru;
+  const summary = `# Саммари чата: Test
+
+## Ссылки из профилей
+
+| Автор | Основная ссылка | Telegram | Что предлагает | Источник |
+| --- | --- | --- | --- | --- |
+| 佩恩 火影 | [narutoai.store](https://www.narutoai.store/) | [@konohashop17](https://t.me/konohashop17) | GPT/Claude/Grok/Perplexity/Cursor | профиль и сообщения |
+`;
+
+  const structured = buildStructuredSummary(
+    { id: "1", title: "Test" },
+    [
+      {
+        id: 1,
+        date: "2026-03-22T10:00:00.000Z",
+        senderId: "123",
+        senderLabel: "Ivan (123)",
+        text: "Hello",
+      },
+    ],
+    summary,
+    language,
+  );
+
+  assert.deepEqual(structured.parsed.profileLinks, [
+    "佩恩 火影 | [narutoai.store](https://www.narutoai.store/) | [@konohashop17](https://t.me/konohashop17) | GPT/Claude/Grok/Perplexity/Cursor | профиль и сообщения",
+  ]);
 });
 
 test("resolveRunMode supports the documented aliases", () => {

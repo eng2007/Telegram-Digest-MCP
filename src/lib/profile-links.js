@@ -38,6 +38,10 @@ function normalizeProfileLink(rawValue) {
   return `https://${raw}`;
 }
 
+function isTelegramProfileUrl(url) {
+  return /^https:\/\/(?:t\.me|telegram\.me)\//iu.test(String(url || ""));
+}
+
 export function extractProfileLinksFromText(text) {
   const source = String(text || "");
   const links = [];
@@ -305,17 +309,34 @@ function collectAuthorMessageSample(messages, senderId, options = {}) {
   return capText(lines.join("\n"), Number.isFinite(charLimit) && charLimit > 0 ? charLimit : 6000);
 }
 
+function selectPreferredProfileLink(profile) {
+  const links = Array.isArray(profile?.links) ? profile.links : [];
+  const externalLink = links.find((link) => link?.url && !isTelegramProfileUrl(link.url));
+
+  if (externalLink?.url) {
+    return externalLink.url;
+  }
+
+  if (links[0]?.url) {
+    return links[0].url;
+  }
+
+  return profile?.profileUrl || null;
+}
+
 export function buildProfileLinkAnalysisUserPrompt(profilesWithLinks, messages, options = {}) {
   const blocks = profilesWithLinks.map((profile, index) => {
     const links = profile.links.map((link) => `- ${link.url}`).join("\n");
     const messagesSample = collectAuthorMessageSample(messages, profile.senderId, options) || "- No text messages.";
+    const preferredLink = selectPreferredProfileLink(profile);
 
     return [
       `Author ${index + 1}`,
       `Name: ${profile.displayName || profile.senderId}`,
       `Sender id: ${profile.senderId}`,
       `Username: ${profile.username ? `@${profile.username}` : "unknown"}`,
-      `Profile URL: ${profile.profileUrl || "unknown"}`,
+      `Preferred offer link: ${preferredLink || "unknown"}`,
+      `Telegram profile URL: ${profile.profileUrl || "unknown"}`,
       `Profile text: ${profile.about || "(empty)"}`,
       "Links found in profile text:",
       links,
@@ -331,6 +352,24 @@ function profileLinksHeading(language) {
   return language.headings?.profileLinks || "Profile links";
 }
 
+function getProfileLinksTableColumns(language) {
+  switch (language?.id) {
+    case "ru":
+      return ["Автор", "Основная ссылка", "Telegram", "Что предлагает", "Источник"];
+    case "es":
+      return ["Autor", "Enlace principal", "Telegram", "Qué ofrece", "Fuente"];
+    case "de":
+      return ["Autor", "Hauptlink", "Telegram", "Angebot", "Quelle"];
+    case "fr":
+      return ["Auteur", "Lien principal", "Telegram", "Offre", "Source"];
+    case "zh-cn":
+      return ["作者", "主要链接", "Telegram", "提供内容", "来源"];
+    case "en":
+    default:
+      return ["Owner", "Main link", "Telegram", "Offer", "Evidence"];
+  }
+}
+
 function stripLeadingMarkdownHeading(markdown) {
   return String(markdown || "")
     .trim()
@@ -338,13 +377,47 @@ function stripLeadingMarkdownHeading(markdown) {
     .trim();
 }
 
+function normalizeProfileLinksTableRows(markdown) {
+  const lines = stripLeadingMarkdownHeading(markdown)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (!lines.length) {
+    return "";
+  }
+
+  const tableLines = lines.filter((line) => line.startsWith("|"));
+
+  if (!tableLines.length) {
+    return lines.join("\n");
+  }
+
+  const nonSeparatorLines = tableLines.filter(
+    (line) => !/^\|\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/u.test(line),
+  );
+
+  if (nonSeparatorLines.length >= 2) {
+    return nonSeparatorLines.slice(1).join("\n").trim();
+  }
+
+  return nonSeparatorLines.join("\n").trim();
+}
+
 export function buildProfileLinksMarkdown(analysisMarkdown, language) {
-  const body = stripLeadingMarkdownHeading(analysisMarkdown);
+  const body = normalizeProfileLinksTableRows(analysisMarkdown);
   if (!body) {
     return "";
   }
 
-  return `## ${profileLinksHeading(language)}\n\n${body}`;
+  if (!body.startsWith("|")) {
+    return `## ${profileLinksHeading(language)}\n\n${body}`;
+  }
+
+  const columns = getProfileLinksTableColumns(language);
+  const header = `| ${columns.join(" | ")} |`;
+  const separator = `| ${columns.map(() => "---").join(" | ")} |`;
+  return `## ${profileLinksHeading(language)}\n\n${header}\n${separator}\n${body}`;
 }
 
 export async function summarizeProfileLinks(profilesWithLinks, messages, llmSelection, language, options = {}) {
@@ -352,13 +425,22 @@ export async function summarizeProfileLinks(profilesWithLinks, messages, llmSele
     return "";
   }
 
+  const columns = getProfileLinksTableColumns(language);
+  const header = `| ${columns.join(" | ")} |`;
+  const separator = `| ${columns.map(() => "---").join(" | ")} |`;
   const systemPrompt = [
     `You analyze Telegram profile links in ${language.label}.`,
     "For every provided profile link, infer what the profile owner sells, offers, promotes, or represents.",
     "Use only the profile text and the author's messages included in the prompt.",
+    "When the profile text contains an external or shop link, use that Preferred offer link first in the row.",
+    "If a Telegram profile URL is available, keep it in the same row as a secondary contact/profile link.",
+    "Use the Telegram profile URL as the only link only when no better external link is available.",
     "If there is not enough evidence, say that it is unclear instead of guessing.",
-    "Return markdown bullet points only, one bullet per link.",
-    "Each bullet must include the owner, the link, what they sell/offer, and the evidence source.",
+    "Return a markdown table only.",
+    `Use exactly these columns in this order: ${columns.join(", ")}.`,
+    "Include one row per profile.",
+    "Each row must include the owner, the main link, the Telegram profile link when available, what they sell/offer, and the evidence source.",
+    `Return the full table using this header:\n${header}\n${separator}`,
   ].join(" ");
   const userPrompt = buildProfileLinkAnalysisUserPrompt(profilesWithLinks, messages, options);
   const analysis = await callLlm(llmSelection.provider, llmSelection.modelId, systemPrompt, userPrompt);
