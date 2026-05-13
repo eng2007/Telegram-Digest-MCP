@@ -172,7 +172,36 @@ export function buildStructuredSummary(dialog, messages, summary, language, extr
 function markdownToHtml(markdown) {
   return markdownRenderer
     .render(markdown)
-    .replace(/<a href="(https?:\/\/[^"]+)">/g, '<a href="$1" target="_blank" rel="noreferrer noopener">');
+    .replace(/<a href="(https?:\/\/[^"]+)">/g, '<a href="$1" target="_blank" rel="noreferrer noopener">')
+    .replace(/<pre>[\s\S]*?<\/pre>|<code>[\s\S]*?<\/code>/g, (segment) => {
+      if (!segment.startsWith("<code>")) {
+        return segment;
+      }
+
+      const content = segment.slice("<code>".length, -"</code>".length);
+      const protocolMatches = [...content.matchAll(/https?:\/\/[^\s<]+/g)].map((match) => ({
+        index: match.index,
+        lastIndex: match.index + match[0].length,
+        url: match[0],
+      }));
+      const matches = protocolMatches.length ? protocolMatches : markdownRenderer.linkify.match(content);
+
+      if (!matches?.length) {
+        return segment;
+      }
+
+      let cursor = 0;
+      let linkedContent = "";
+
+      for (const match of matches) {
+        linkedContent += content.slice(cursor, match.index);
+        linkedContent += `<a href="${match.url}" target="_blank" rel="noreferrer noopener">${content.slice(match.index, match.lastIndex)}</a>`;
+        cursor = match.lastIndex;
+      }
+
+      linkedContent += content.slice(cursor);
+      return `<code>${linkedContent}</code>`;
+    });
 }
 
 function buildHtmlReport(dialog, messages, markdownReport, language) {

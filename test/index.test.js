@@ -545,3 +545,38 @@ test("saveOutputs writes only the requested output formats", async () => {
   await fs.unlink(files.summaryPath);
   await fs.unlink(files.htmlPath);
 });
+
+test("saveOutputs makes inline-code URLs clickable in HTML reports", async () => {
+  const files = await saveOutputs(
+    { id: "dialog-2", title: "Clickable Inline Code Links" },
+    [
+      {
+        id: 1,
+        date: "2026-03-22T10:00:00.000Z",
+        senderId: "123",
+        senderLabel: "Ivan (123)",
+        text: "Hello",
+      },
+    ],
+    "# Summary\n\n## Useful links\n- `https://example.com/docs`\n- `Open https://example.com/shop?id=1&ref=abc`\n- `team链接https://t.me/gptnocard_bot?start=inv_yubJFmFWono`",
+    SUMMARY_LANGUAGES.en,
+    ["html"],
+  );
+
+  const html = await fs.readFile(files.htmlPath, "utf8");
+
+  assert.match(
+    html,
+    /<code><a href="https:\/\/example\.com\/docs" target="_blank" rel="noreferrer noopener">https:\/\/example\.com\/docs<\/a><\/code>/,
+  );
+  assert.match(
+    html,
+    /<code>Open <a href="https:\/\/example\.com\/shop\?id=1&amp;ref=abc" target="_blank" rel="noreferrer noopener">https:\/\/example\.com\/shop\?id=1&amp;ref=abc<\/a><\/code>/,
+  );
+  assert.match(
+    html,
+    /<code>team链接<a href="https:\/\/t\.me\/gptnocard_bot\?start=inv_yubJFmFWono" target="_blank" rel="noreferrer noopener">https:\/\/t\.me\/gptnocard_bot\?start=inv_yubJFmFWono<\/a><\/code>/,
+  );
+
+  await fs.unlink(files.htmlPath);
+});
